@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>English Learning App</title>
+    
+    <!-- Tailwind CSS (デザイン) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome (アイコン) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Import Map (ReactとFirebaseの読み込み設定) -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
+        "firebase/auth": "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js"
+      }
+    }
+    </script>
+
+    <!-- Babel (ブラウザでReactを動かすための変換ツール) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        /* 追加のカスタムスタイル */
+        body { background-color: #f8fafc; font-family: sans-serif; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* アニメーション */
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+        .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- アプリケーションのロジック -->
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { initializeApp } from "firebase/app";
+        import { 
+            getAuth, 
+            onAuthStateChanged, 
+            createUserWithEmailAndPassword, 
+            signInWithEmailAndPassword, 
+            updateProfile, 
+            signOut
+        } from "firebase/auth";
+        import { 
+            getFirestore, 
+            doc, 
+            setDoc, 
+            addDoc,
+            updateDoc,
+            deleteDoc,
+            onSnapshot, 
+            collection, 
+            query, 
+            where,
+            serverTimestamp 
+        } from "firebase/firestore";
+
+        // ==========================================
+        // 1. Firebase 設定
+        // ==========================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyDHALdPp_81FAJYPKJtVF29W0ynfd2Zt8U",
+            authDomain: "learning-app-5572d.firebaseapp.com",
+            projectId: "learning-app-5572d",
+            storageBucket: "learning-app-5572d.firebasestorage.app",
+            messagingSenderId: "55507580860",
+            appId: "1:55507580860:web:15bda0c22907afd9919db9",
+            measurementId: "G-NS3X5N46Z7"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = "learning-app-5572d"; // データ保存用ID
+
+        // ==========================================
+        // 2. ユーティリティ関数
+        // ==========================================
+        
+        // AI問題生成シミュレーター
+        const mockGenerateProblems = (vocabInput, grammarInput) => {
+            const vocabList = vocabInput.split(/[,、\n]+/).map(w => w.trim()).filter(w => w.length > 0);
+            const grammarTopic = grammarInput.trim();
+            let generated = [];
+
+            if (grammarTopic) {
+                const grammarTemplates = [
+                    { q: `She _____ (study) English hard yesterday. [Theme: ${grammarTopic}]`, a: 'studied', o: ['studied', 'studies', 'study', 'studying'], e: `${grammarTopic}のルールに従って動詞を変化させます。` },
+                    { q: `This is the book _____ I bought. [Theme: ${grammarTopic}]`, a: 'which', o: ['which', 'who', 'where', 'when'], e: `${grammarTopic}を用いた表現です。` },
+                    { q: `If I _____ you, I would go there. [Theme: ${grammarTopic}]`, a: 'were', o: ['were', 'was', 'am', 'be'], e: `${grammarTopic}の重要表現です。` }
+                ];
+                const t = grammarTemplates[Math.floor(Math.random() * grammarTemplates.length)];
+                generated.push({
+                    tempId: `ai-g-${Date.now()}`,
+                    question: t.q.replace('[Theme: ' + grammarTopic + ']', ''),
+                    options: t.o,
+                    answer: t.a,
+                    explanation: `【AI解説】「${grammarTopic}」のポイント: ${t.e}`,
+                    sentence: t.q.split('[')[0],
+                    category: 'grammar',
+                    isAiGenerated: true
+                });
+            }
+
+            if (vocabList.length > 0) {
+                const targetWords = vocabList.slice(0, 3);
+                targetWords.forEach((word, idx) => {
+                    const dummyOptions = ['extraordinary', 'curious', 'potential', 'efficient', 'challenging', 'maintain', 'admire'].filter(w => w !== word);
+                    const shuffledDummies = dummyOptions.sort(() => 0.5 - Math.random()).slice(0, 3);
+                    const options = [word, ...shuffledDummies].sort(() => 0.5 - Math.random());
+
+                    generated.push({
+                        tempId: `ai-v-${Date.now()}-${idx}`,
+                        question: `Select the word that matches the textbook definition for: "${word.toUpperCase()}"`,
+                        options: options,
+                        answer: word,
+                        explanation: `【AI解説】教科書重要単語「${word}」の意味と用法を確認しましょう。`,
+                        sentence: `This represents ${word}.`,
+                        category: 'vocabulary',
+                        isAiGenerated: true
+                    });
+                });
+            }
+            return generated;
+        };
+
+        const getLevelInfo = (totalXp) => {
+            let level = 1;
+            let requiredXpForNextLevel = 100;
+            let accumulatedXpForCurrentLevel = 0;
+            while (totalXp >= accumulatedXpForCurrentLevel + requiredXpForNextLevel) {
+                accumulatedXpForCurrentLevel += requiredXpForNextLevel;
+                level++;
+                requiredXpForNextLevel = level * 100;
+            }
+            const currentLevelXp = totalXp - accumulatedXpForCurrentLevel;
+            const progress = Math.min(100, (currentLevelXp / requiredXpForNextLevel) * 100);
+            return { level, currentLevelXp, requiredXpForNextLevel, progress };
+        };
+
+        const playAudio = (text) => {
+            if (!window.speechSynthesis) return;
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'en-US';
+            utterance.rate = 0.9;
+            window.speechSynthesis.speak(utterance);
+        };
+
+        // ==========================================
+        // 3. コンポーネント群
+        // ==========================================
+
+        // --- 認証画面 ---
+        const AuthScreen = () => {
+            const [isLogin, setIsLogin] = useState(true);
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [name, setName] = useState('');
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setError('');
+                setLoading(true);
+                try {
+                    if (isLogin) {
+                        await signInWithEmailAndPassword(auth, email, password);
+                    } else {
+                        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                        await updateProfile(userCredential.user, { displayName: name });
+                        const userRef = doc(db, 'artifacts', appId, 'users', userCredential.user.uid, 'data', 'profile');
+                        await setDoc(userRef, { xp: 0, streak: 1, createdAt: serverTimestamp() });
+                    }
+                } catch (err) {
+                    setError(err.message.replace('Firebase: ', ''));
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+                    <div className="bg-white w-full max-w-sm p-8 rounded-2xl shadow-xl">
+                        <div className="text-center mb-8">
+                            <div className="bg-indigo-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-indigo-600">
+                                <i className="fas fa-book text-3xl"></i>
+                            </div>
+                            <h1 className="text-2xl font-bold text-slate-800">English App</h1>
+                            <p className="text-slate-500 text-sm mt-2">{isLogin ? '学習を再開' : 'アカウント作成'}</p>
+                        </div>
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            {!isLogin && (
+                                <div className="relative">
+                                    <i className="fas fa-user absolute left-3 top-3.5 text-slate-400"></i>
+                                    <input type="text" placeholder="名前" value={name} onChange={(e) => setName(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500" required />
+                                </div>
+                            )}
+                            <div className="relative">
+                                <i className="fas fa-envelope absolute left-3 top-3.5 text-slate-400"></i>
+                                <input type="email" placeholder="メールアドレス" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500" required />
+                            </div>
+                            <div className="relative">
+                                <i className="fas fa-lock absolute left-3 top-3.5 text-slate-400"></i>
+                                <input type="password" placeholder="パスワード" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500" required />
+                            </div>
+                            {error && <div className="bg-red-50 text-red-500 text-sm p-3 rounded-lg flex items-center"><i className="fas fa-exclamation-circle mr-2"></i>{error}</div>}
+                            <button type="submit" disabled={loading} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors flex items-center justify-center">
+                                {loading ? <i className="fas fa-spinner fa-spin"></i> : (isLogin ? 'ログイン' : '登録する')}
+                            </button>
+                        </form>
+                        <div className="mt-6 text-center">
+                            <button onClick={() => setIsLogin(!isLogin)} className="text-sm text-slate-500 hover:text-indigo-600 font-medium">
+                                {isLogin ? "アカウント作成はこちら" : "ログインはこちら"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- ホーム画面 ---
+        const HomeScreen = ({ userStats, assignments, onStartAssignment, onStartSelfStudy, onGoToSpeaking, onGoToCreate, userName }) => {
+            const levelInfo = getLevelInfo(userStats.xp);
+            return (
+                <div className="space-y-6 pb-20">
+                    <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-4 opacity-10"><i className="fas fa-trophy text-9xl"></i></div>
+                        <div className="relative z-10">
+                            <div className="flex justify-between items-start mb-2">
+                                <div>
+                                    <p className="text-indigo-100 text-sm font-bold tracking-wider mb-1">HELLO, {userName?.toUpperCase() || 'STUDENT'}</p>
+                                    <h1 className="text-5xl font-extrabold text-white flex items-baseline">{levelInfo.level}<span className="text-lg ml-2 font-normal text-indigo-200">Level</span></h1>
+                                </div>
+                                <div className="bg-white/20 px-3 py-1 rounded-full flex items-center backdrop-blur-sm"><i className="fas fa-chart-line mr-1 text-yellow-300"></i><span className="font-bold">{userStats.streak} Day Streak</span></div>
+                            </div>
+                            <div className="mt-6">
+                                <div className="flex justify-between text-xs font-bold text-indigo-200 mb-2"><span>{levelInfo.currentLevelXp} XP</span><span>Next Lv: {levelInfo.requiredXpForNextLevel - levelInfo.currentLevelXp} XP needed</span></div>
+                                <div className="w-full bg-black/20 rounded-full h-3 overflow-hidden backdrop-blur-sm border border-white/10"><div className="bg-gradient-to-r from-yellow-400 to-orange-500 h-full rounded-full transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(251,191,36,0.5)]" style={{ width: `${levelInfo.progress}%` }}></div></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button onClick={onGoToCreate} className="w-full bg-white p-4 rounded-xl shadow-md border-2 border-indigo-100 flex items-center justify-between hover:border-indigo-300 hover:bg-indigo-50 transition-all group">
+                        <div className="flex items-center space-x-4"><div className="bg-indigo-100 text-indigo-600 p-3 rounded-full group-hover:scale-110 transition-transform"><i className="fas fa-lightbulb text-xl"></i></div><div className="text-left"><h3 className="font-bold text-slate-800">問題を作ってXPゲット！</h3><p className="text-xs text-slate-500">あなたの作った問題が採用されるかも？</p></div></div>
+                        <div className="bg-yellow-400 text-white text-xs font-bold px-3 py-1 rounded-full shadow-sm">+50 XP</div>
+                    </button>
+
+                    <section>
+                        <div className="flex justify-between items-center mb-3 px-1"><h2 className="text-lg font-bold text-slate-800 flex items-center"><i className="fas fa-briefcase mr-2 text-blue-500"></i>先生からの課題</h2>{assignments.length > 0 && <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-full font-bold">{assignments.filter(a => !a.completed).length} New</span>}</div>
+                        <div className="space-y-3">
+                            {assignments.length === 0 ? (
+                                <div className="p-8 text-center bg-slate-100 rounded-xl border-2 border-dashed border-slate-200 text-slate-400"><i className="fas fa-briefcase text-4xl mb-2 opacity-50"></i><p className="font-bold">課題はありません</p></div>
+                            ) : (
+                                assignments.map(assignment => (
+                                    <div key={assignment.id} className={`bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center transition-all active:scale-[0.98] ${assignment.completed ? 'opacity-60 bg-slate-50' : ''}`}>
+                                        <div className="flex items-start space-x-3"><div className={`p-3 rounded-xl ${assignment.category === 'Grammar' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}><i className={`fas ${assignment.category === 'Grammar' ? 'fa-book' : 'fa-star'} text-xl`}></i></div><div><h3 className="font-bold text-slate-800 text-sm">{assignment.title}</h3><div className="flex items-center space-x-2 mt-1"><span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-500 rounded font-bold">{assignment.xp} XP</span><span className="text-xs text-slate-400">{assignment.problems.length} Questions</span></div></div></div>
+                                        {assignment.completed ? <div className="flex items-center text-green-600 font-bold text-sm bg-green-50 px-3 py-1 rounded-full"><i className="fas fa-check-circle mr-1"></i> Done</div> : <button onClick={() => onStartAssignment(assignment)} className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-colors">Start</button>}
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </section>
+
+                    <section>
+                        <h2 className="text-lg font-bold text-slate-800 mb-3 px-1 flex items-center"><i className="fas fa-bolt mr-2 text-yellow-500"></i>自己学習</h2>
+                        <div className="grid grid-cols-2 gap-3">
+                            <button onClick={() => onStartSelfStudy('vocabulary')} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 text-left hover:border-orange-200 hover:shadow-md transition-all group"><div className="bg-orange-100 w-12 h-12 rounded-2xl flex items-center justify-center text-orange-600 mb-3 group-hover:scale-110 transition-transform shadow-inner"><i className="fas fa-star text-xl"></i></div><h3 className="font-bold text-slate-700">単語</h3><p className="text-xs text-slate-500 mt-1">語彙力を強化</p></button>
+                            <button onClick={() => onStartSelfStudy('grammar')} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 text-left hover:border-green-200 hover:shadow-md transition-all group"><div className="bg-green-100 w-12 h-12 rounded-2xl flex items-center justify-center text-green-600 mb-3 group-hover:scale-110 transition-transform shadow-inner"><i className="fas fa-book text-xl"></i></div><h3 className="font-bold text-slate-700">文法</h3><p className="text-xs text-slate-500 mt-1">ルールを習得</p></button>
+                            <button onClick={onGoToSpeaking} className="col-span-2 bg-gradient-to-r from-purple-600 to-pink-500 p-5 rounded-2xl shadow-lg text-white text-left relative overflow-hidden group hover:shadow-xl transition-all"><div className="relative z-10 flex items-center justify-between"><div><h3 className="font-bold text-xl">スピーキング練習</h3><p className="text-xs text-purple-100 mt-1">AI発音判定付き</p></div><div className="bg-white/20 p-3 rounded-full group-hover:bg-white/30 transition-colors backdrop-blur-sm"><i className="fas fa-microphone text-xl"></i></div></div></button>
+                        </div>
+                    </section>
+                </div>
+            );
+        };
+
+        // --- 生徒用問題作成 ---
+        const StudentCreateScreen = ({ onExit, onSubmitProblem }) => {
+            const [question, setQuestion] = useState('');
+            const [answer, setAnswer] = useState('');
+            const [wrong1, setWrong1] = useState('');
+            const [wrong2, setWrong2] = useState('');
+            const [wrong3, setWrong3] = useState('');
+            const [category, setCategory] = useState('vocabulary');
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                onSubmitProblem({ question, options: [answer, wrong1, wrong2, wrong3], answer, explanation: 'Student created problem', sentence: question, category, author: 'Student', createdAt: serverTimestamp(), status: 'pending' });
+            };
+
+            return (
+                <div className="h-full flex flex-col pb-6 bg-indigo-50">
+                    <div className="bg-indigo-600 text-white p-4 flex items-center space-x-3 shadow-md"><button onClick={onExit}><i className="fas fa-times text-xl"></i></button><h2 className="font-bold text-lg">クイズを作ろう！</h2></div>
+                    <div className="flex-1 overflow-y-auto p-4">
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-indigo-100 mb-6 text-center"><i className="fas fa-lightbulb text-4xl text-yellow-400 mb-2"></i><h3 className="font-bold text-indigo-900 text-lg">あなたの知識をテストに！</h3><p className="text-sm text-slate-500">問題を作ると<span className="font-bold text-orange-500">50XP</span>もらえます。</p></div>
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div className="bg-white p-4 rounded-xl shadow-sm"><label className="block text-sm font-bold text-slate-700 mb-2">カテゴリー</label><div className="flex space-x-2"><button type="button" onClick={() => setCategory('vocabulary')} className={`flex-1 py-2 rounded-lg text-sm font-bold border-2 ${category === 'vocabulary' ? 'border-orange-500 bg-orange-50 text-orange-600' : 'border-slate-100 text-slate-400'}`}>単語</button><button type="button" onClick={() => setCategory('grammar')} className={`flex-1 py-2 rounded-lg text-sm font-bold border-2 ${category === 'grammar' ? 'border-green-500 bg-green-50 text-green-600' : 'border-slate-100 text-slate-400'}`}>文法</button></div></div>
+                            <div className="bg-white p-4 rounded-xl shadow-sm space-y-3">
+                                <div><label className="block text-xs font-bold text-slate-500 mb-1">問題文 (英語)</label><input required type="text" value={question} onChange={e => setQuestion(e.target.value)} placeholder="例: Apple" className="w-full p-3 bg-slate-50 border rounded-lg" /></div>
+                                <div><label className="block text-xs font-bold text-green-600 mb-1">正解</label><input required type="text" value={answer} onChange={e => setAnswer(e.target.value)} placeholder="例: りんご" className="w-full p-3 bg-green-50 border border-green-200 rounded-lg" /></div>
+                                <div><label className="block text-xs font-bold text-slate-500 mb-1">不正解の選択肢 (3つ)</label><input required type="text" value={wrong1} onChange={e => setWrong1(e.target.value)} placeholder="選択肢 1" className="w-full p-2 bg-slate-50 border rounded-lg mb-2" /><input required type="text" value={wrong2} onChange={e => setWrong2(e.target.value)} placeholder="選択肢 2" className="w-full p-2 bg-slate-50 border rounded-lg mb-2" /><input required type="text" value={wrong3} onChange={e => setWrong3(e.target.value)} placeholder="選択肢 3" className="w-full p-2 bg-slate-50 border rounded-lg" /></div>
+                            </div>
+                            <button type="submit" className="w-full py-4 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 flex items-center justify-center space-x-2"><i className="fas fa-paper-plane"></i><span>先生に提出する (+50XP)</span></button>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- 教師画面 ---
+        const TeacherScreen = ({ onExit, onAddProblem, onCreateAssignment, vocabCount, grammarCount, submissions, onApproveSubmission, onRejectSubmission }) => {
+            const [activeTab, setActiveTab] = useState('ai'); 
+            const [notification, setNotification] = useState('');
+            const [vocabInput, setVocabInput] = useState('');
+            const [grammarInput, setGrammarInput] = useState('');
+            const [isGenerating, setIsGenerating] = useState(false);
+            const [generatedProblems, setGeneratedProblems] = useState([]);
+            const [problemType, setProblemType] = useState('vocabulary');
+            const [question, setQuestion] = useState('');
+            const [option1, setOption1] = useState('');
+            const [option2, setOption2] = useState('');
+            const [option3, setOption3] = useState('');
+            const [option4, setOption4] = useState('');
+            const [correctOptionIndex, setCorrectOptionIndex] = useState(0);
+            const [explanation, setExplanation] = useState('');
+            const [assignmentTitle, setAssignmentTitle] = useState('');
+            const [assignmentCategory, setAssignmentCategory] = useState('Vocabulary');
+
+            const showNotification = (msg) => { setNotification(msg); setTimeout(() => setNotification(''), 3000); };
+
+            const handleGenerate = () => {
+                if (!vocabInput && !grammarInput) { alert("単語または文法を入力してください"); return; }
+                setIsGenerating(true);
+                setTimeout(() => {
+                    const problems = mockGenerateProblems(vocabInput, grammarInput);
+                    setGeneratedProblems(problems);
+                    setIsGenerating(false);
+                }, 1500);
+            };
+
+            const handleApproveGenerated = (problem) => {
+                const { tempId, ...rest } = problem;
+                onAddProblem(rest.category, rest);
+                setGeneratedProblems(prev => prev.filter(p => p.tempId !== tempId));
+                showNotification('AI生成問題を採用しました');
+            };
+
+            const handleAddProblem = (e) => {
+                e.preventDefault();
+                const options = [option1, option2, option3, option4];
+                onAddProblem(problemType, { question, options, answer: options[correctOptionIndex], explanation, sentence: question, category: problemType, createdAt: serverTimestamp() });
+                setQuestion(''); setOption1(''); setOption2(''); setOption3(''); setOption4(''); setExplanation('');
+                showNotification('問題を追加しました！');
+            };
+
+            const handleCreateAssignment = (e) => {
+                e.preventDefault();
+                onCreateAssignment(assignmentTitle, assignmentCategory);
+                setAssignmentTitle('');
+                showNotification('課題を配信しました！');
+            };
+
+            return (
+                <div className="h-full flex flex-col pb-6 bg-slate-50">
+                    <div className="bg-slate-800 text-white p-4 flex items-center justify-between shadow-md z-10">
+                        <div className="flex items-center space-x-2"><i className="fas fa-pen-nib"></i><h2 className="font-bold text-lg">教師モード</h2></div>
+                        <button onClick={onExit} className="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg text-xs font-bold transition-colors">生徒モードへ</button>
+                    </div>
+                    <div className="flex bg-white shadow-sm mb-4 overflow-x-auto no-scrollbar">
+                        <button onClick={() => setActiveTab('ai')} className={`flex-1 min-w-[90px] py-3 text-xs font-bold flex flex-col items-center justify-center space-y-1 border-b-2 ${activeTab === 'ai' ? 'border-purple-500 text-purple-600 bg-purple-50' : 'border-transparent text-slate-400'}`}><i className="fas fa-magic text-lg"></i><span>AI生成</span></button>
+                        <button onClick={() => setActiveTab('review')} className={`flex-1 min-w-[90px] py-3 text-xs font-bold flex flex-col items-center justify-center space-y-1 border-b-2 ${activeTab === 'review' ? 'border-pink-500 text-pink-600 bg-pink-50' : 'border-transparent text-slate-400'}`}><div className="relative"><i className="fas fa-inbox text-lg"></i>{submissions.length > 0 && <span className="absolute -top-1 -right-2 bg-red-500 text-white text-[9px] w-4 h-4 flex items-center justify-center rounded-full">{submissions.length}</span>}</div><span>投稿確認</span></button>
+                        <button onClick={() => setActiveTab('add_problem')} className={`flex-1 min-w-[90px] py-3 text-xs font-bold flex flex-col items-center justify-center space-y-1 border-b-2 ${activeTab === 'add_problem' ? 'border-blue-500 text-blue-600 bg-blue-50' : 'border-transparent text-slate-400'}`}><i className="fas fa-plus-circle text-lg"></i><span>手動追加</span></button>
+                        <button onClick={() => setActiveTab('create_assignment')} className={`flex-1 min-w-[90px] py-3 text-xs font-bold flex flex-col items-center justify-center space-y-1 border-b-2 ${activeTab === 'create_assignment' ? 'border-green-500 text-green-600 bg-green-50' : 'border-transparent text-slate-400'}`}><i className="fas fa-briefcase text-lg"></i><span>課題配信</span></button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto px-4 pb-20">
+                        {notification && <div className="mb-4 bg-green-100 text-green-700 px-4 py-3 rounded-lg flex items-center shadow-sm animate-fade-in border border-green-200"><i className="fas fa-check-circle mr-2"></i>{notification}</div>}
+                        {activeTab === 'ai' && (
+                            <div className="space-y-6">
+                                <div className="bg-white p-6 rounded-xl shadow-sm border border-purple-100">
+                                    <div className="flex items-center space-x-2 mb-4 text-purple-700"><i className="fas fa-magic text-xl"></i><h3 className="font-bold text-lg">AI問題作成</h3></div>
+                                    <div className="space-y-4 mb-6">
+                                        <div><label className="block text-xs font-bold text-purple-700 mb-1">重要単語 (カンマ区切り)</label><textarea value={vocabInput} onChange={(e) => setVocabInput(e.target.value)} placeholder="例: sustainable, efficiency" className="w-full p-3 bg-slate-50 border border-purple-100 rounded-lg outline-none text-sm" rows="2" /></div>
+                                        <div><label className="block text-xs font-bold text-purple-700 mb-1">重要文法</label><textarea value={grammarInput} onChange={(e) => setGrammarInput(e.target.value)} placeholder="例: 現在完了形" className="w-full p-3 bg-slate-50 border border-purple-100 rounded-lg outline-none text-sm" rows="2" /></div>
+                                    </div>
+                                    <button onClick={handleGenerate} disabled={isGenerating} className="w-full py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold rounded-xl shadow-lg flex items-center justify-center space-x-2">
+                                        {isGenerating ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-magic"></i>}<span>{isGenerating ? '生成中...' : '問題を生成する'}</span>
+                                    </button>
+                                </div>
+                                {generatedProblems.length > 0 && <div className="space-y-3 animate-slide-up"><h4 className="font-bold text-slate-700 px-1">生成された問題</h4>{generatedProblems.map(p => (<div key={p.tempId} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200"><h5 className="font-bold text-lg text-slate-800 mb-1">{p.question}</h5><p className="text-sm text-green-600 font-bold mb-2">A: {p.answer}</p><div className="flex space-x-2"><button onClick={() => handleApproveGenerated(p)} className="flex-1 bg-purple-600 text-white py-2 rounded-lg text-xs font-bold">採用</button><button onClick={() => setGeneratedProblems(prev => prev.filter(x => x.tempId !== p.tempId))} className="px-3 bg-slate-100 text-slate-400 rounded-lg"><i className="fas fa-trash"></i></button></div></div>))}</div>}
+                            </div>
+                        )}
+                        {activeTab === 'review' && (
+                            <div className="space-y-4">
+                                {submissions.length === 0 ? <div className="text-center py-10 text-slate-400"><i className="fas fa-inbox text-4xl mb-2 opacity-30"></i><p>投稿はありません</p></div> : submissions.map(sub => (<div key={sub.id} className="bg-white p-4 rounded-xl shadow-sm border border-pink-100 relative"><div className="absolute top-0 left-0 bg-pink-500 text-white text-[10px] px-2 py-1 rounded-br-lg font-bold">New!</div><div className="mt-4"><h3 className="font-bold text-lg text-slate-800">{sub.question}</h3><p className="text-sm bg-green-50 text-green-700 px-2 py-1 rounded border border-green-100 flex items-center mt-2"><i className="fas fa-check-circle mr-1"></i> {sub.answer}</p></div><div className="flex space-x-2 mt-4"><button onClick={() => { onApproveSubmission(sub); showNotification('採用しました'); }} className="flex-1 bg-green-600 text-white py-2 rounded-lg font-bold text-sm shadow-md">採用</button><button onClick={() => { onRejectSubmission(sub.id); showNotification('却下しました'); }} className="flex-1 bg-slate-200 text-slate-600 py-2 rounded-lg font-bold text-sm">見送る</button></div></div>))}
+                            </div>
+                        )}
+                        {activeTab === 'add_problem' && (
+                            <form onSubmit={handleAddProblem} className="space-y-4"><div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100"><label className="block text-sm font-bold text-slate-700 mb-2">カテゴリー</label><div className="flex space-x-2"><button type="button" onClick={() => setProblemType('vocabulary')} className={`flex-1 py-2 rounded-lg text-sm font-bold border-2 ${problemType === 'vocabulary' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-100 text-slate-400'}`}>単語 ({vocabCount})</button><button type="button" onClick={() => setProblemType('grammar')} className={`flex-1 py-2 rounded-lg text-sm font-bold border-2 ${problemType === 'grammar' ? 'border-green-500 bg-green-50 text-green-700' : 'border-slate-100 text-slate-400'}`}>文法 ({grammarCount})</button></div></div><div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 space-y-4"><div><label className="block text-sm font-bold text-slate-700 mb-1">問題文</label><input type="text" value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="例: Apple" className="w-full p-3 bg-slate-50 border rounded-lg" required /></div><div><label className="block text-sm font-bold text-slate-700 mb-2">選択肢 (正解を選択)</label><div className="space-y-2">{[option1, option2, option3, option4].map((opt, idx) => (<div key={idx} className="flex items-center space-x-2"><input type="radio" name="correctOption" checked={correctOptionIndex === idx} onChange={() => setCorrectOptionIndex(idx)} className="w-5 h-5 text-blue-600" /><input type="text" value={idx === 0 ? option1 : idx === 1 ? option2 : idx === 2 ? option3 : option4} onChange={(e) => { const val = e.target.value; if(idx===0) setOption1(val); else if(idx===1) setOption2(val); else if(idx===2) setOption3(val); else setOption4(val); }} placeholder={`選択肢 ${idx + 1}`} className="flex-1 p-2 bg-slate-50 border rounded-lg" required /></div>))}</div></div><div><label className="block text-sm font-bold text-slate-700 mb-1">解説</label><textarea value={explanation} onChange={(e) => setExplanation(e.target.value)} className="w-full p-3 bg-slate-50 border rounded-lg" rows="2" required /></div></div><button type="submit" className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg">追加する</button></form>
+                        )}
+                        {activeTab === 'create_assignment' && (
+                            <form onSubmit={handleCreateAssignment} className="space-y-4"><div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 text-center"><h3 className="font-bold text-slate-800 mb-4">課題配信</h3><div className="text-left space-y-4"><div><label className="block text-sm font-bold text-slate-700 mb-1">タイトル</label><input type="text" value={assignmentTitle} onChange={(e) => setAssignmentTitle(e.target.value)} className="w-full p-3 bg-slate-50 border rounded-lg" required /></div><div><label className="block text-sm font-bold text-slate-700 mb-2">カテゴリー</label><select value={assignmentCategory} onChange={(e) => setAssignmentCategory(e.target.value)} className="w-full p-3 bg-slate-50 border rounded-lg"><option value="Vocabulary">単語 ({vocabCount}問)</option><option value="Grammar">文法 ({grammarCount}問)</option></select></div></div><button type="submit" disabled={assignmentCategory === 'Vocabulary' ? vocabCount === 0 : grammarCount === 0} className={`w-full mt-6 py-4 font-bold rounded-xl shadow-lg text-white ${ (assignmentCategory === 'Vocabulary' ? vocabCount === 0 : grammarCount === 0) ? 'bg-gray-300' : 'bg-green-600' }`}>配信する</button></div></form>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- クイズ画面 ---
+        const QuizScreen = ({ quizData, onComplete, onExit }) => {
+            const [currentIndex, setCurrentIndex] = useState(0);
+            const [selectedOption, setSelectedOption] = useState(null);
+            const [isAnswered, setIsAnswered] = useState(false);
+            const [isCorrect, setIsCorrect] = useState(false);
+            const [score, setScore] = useState(0);
+            const [options, setOptions] = useState([]);
+
+            if (!quizData || quizData.length === 0) return null;
+            const currentProblem = quizData[currentIndex];
+
+            useEffect(() => {
+                if (!currentProblem) return;
+                const shuffled = [...currentProblem.options].sort(() => Math.random() - 0.5);
+                setOptions(shuffled);
+                if (currentProblem.sentence || /^[a-zA-Z\s]+$/.test(currentProblem.question)) playAudio(currentProblem.sentence || currentProblem.question);
+            }, [currentIndex, currentProblem]);
+
+            const handleAnswer = (option) => {
+                if (isAnswered) return;
+                setSelectedOption(option);
+                setIsAnswered(true);
+                const correct = option === currentProblem.answer;
+                setIsCorrect(correct);
+                if (correct) setScore(s => s + 1);
+            };
+
+            const handleNext = () => {
+                if (currentIndex < quizData.length - 1) { setCurrentIndex(p => p + 1); setSelectedOption(null); setIsAnswered(false); setIsCorrect(false); }
+                else { onComplete(score, quizData.length); }
+            };
+
+            const progress = ((currentIndex + 1) / quizData.length) * 100;
+
+            return (
+                <div className="h-full flex flex-col pb-6">
+                    <div className="flex items-center justify-between mb-4"><button onClick={onExit}><i className="fas fa-times-circle text-2xl text-slate-400"></i></button><div className="flex-1 mx-4 bg-gray-200 h-2 rounded-full"><div className="bg-blue-600 h-2 rounded-full transition-all duration-300" style={{ width: `${progress}%` }} /></div><span className="text-sm font-bold text-slate-500">{currentIndex + 1}/{quizData.length}</span></div>
+                    <div className="flex-1 flex flex-col justify-center mb-8 text-center"><h2 className="text-3xl font-bold text-slate-800 mb-4">{currentProblem.question}</h2><button onClick={() => playAudio(currentProblem.sentence || currentProblem.question)} className="inline-flex items-center justify-center text-blue-500 bg-blue-50 px-3 py-1 rounded-full text-sm font-bold"><i className="fas fa-volume-up mr-2"></i>Listen</button></div>
+                    <div className="space-y-3 mb-6">{options.map((option, idx) => { let btnClass = "w-full p-4 rounded-xl text-lg font-bold border-2 transition-all shadow-sm "; if (isAnswered) { if (option === currentProblem.answer) btnClass += "bg-green-100 border-green-500 text-green-700"; else if (option === selectedOption) btnClass += "bg-red-100 border-red-500 text-red-700"; else btnClass += "bg-white border-slate-200 text-slate-400 opacity-50"; } else { btnClass += "bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-blue-300"; } return <button key={idx} onClick={() => handleAnswer(option)} disabled={isAnswered} className={btnClass}>{option}</button>; })}</div>
+                    {isAnswered && <div className={`fixed bottom-0 left-0 right-0 p-6 rounded-t-3xl shadow-2xl border-t z-50 animate-slide-up ${isCorrect ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'}`}><div className="max-w-lg mx-auto"><div className="flex items-center mb-2">{isCorrect ? <i className="fas fa-check-circle text-green-600 text-2xl mr-2"></i> : <i className="fas fa-times-circle text-red-600 text-2xl mr-2"></i>}<h3 className={`text-xl font-bold ${isCorrect ? 'text-green-800' : 'text-red-800'}`}>{isCorrect ? 'Excellent!' : 'Correct Answer:'}</h3></div>{!isCorrect && <p className="text-slate-800 font-bold mb-2 ml-9">{currentProblem.answer}</p>}<div className="bg-white/60 p-3 rounded-lg ml-9 mb-4"><p className="text-sm text-slate-600">{currentProblem.explanation}</p></div><button onClick={handleNext} className={`w-full py-4 rounded-xl font-bold text-white shadow-lg text-lg ${isCorrect ? 'bg-green-600' : 'bg-red-500'}`}>Continue</button></div></div>}
+                </div>
+            );
+        };
+
+        // --- 結果画面 ---
+        const ResultScreen = ({ score, total, xpGained, isLevelUp, currentLevel, onHome }) => {
+            const percentage = total > 0 ? (score / total) * 100 : 0;
+            return (
+                <div className="h-full flex flex-col items-center justify-center text-center pb-12 animate-fade-in relative overflow-hidden">
+                    {isLevelUp && <div className="absolute inset-0 bg-black/50 z-50 flex items-center justify-center animate-fade-in"><div className="bg-white p-8 rounded-3xl shadow-2xl transform animate-bounce text-center max-w-xs"><i className="fas fa-trophy text-6xl text-yellow-500 mx-auto mb-4 animate-pulse"></i><h2 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500 mb-2">LEVEL UP!</h2><p className="text-slate-600 font-bold text-lg mb-4">You are now Lv. {currentLevel}</p><button onClick={(e) => { e.target.closest('.absolute').style.display = 'none'; }} className="bg-yellow-500 text-white px-6 py-2 rounded-full font-bold hover:bg-yellow-600">Awesome!</button></div></div>}
+                    <div className="mb-8 relative"><div className="absolute -inset-4 bg-yellow-100 rounded-full animate-pulse opacity-50"></div><i className="fas fa-trophy text-6xl text-yellow-500 relative z-10"></i></div>
+                    <h1 className="text-3xl font-bold text-slate-800 mb-2">Complete!</h1>
+                    <p className="text-slate-500 mb-8">お疲れ様でした！</p>
+                    <div className="bg-white w-full rounded-2xl p-6 shadow-sm border border-slate-100 mb-6 grid grid-cols-2 gap-4"><div className="border-r border-slate-100"><p className="text-xs text-slate-400 uppercase font-bold tracking-wider">Score</p><p className="text-4xl font-bold text-blue-600 mt-1">{score}<span className="text-lg text-slate-300">/{total}</span></p></div><div><p className="text-xs text-slate-400 uppercase font-bold tracking-wider">XP Gained</p><p className="text-4xl font-bold text-yellow-500 mt-1">+{xpGained}</p></div></div>
+                    <div className="w-full bg-slate-100 rounded-full h-4 mb-8 overflow-hidden"><div className={`h-full rounded-full ${percentage >= 80 ? 'bg-green-500' : 'bg-blue-500'}`} style={{ width: `${percentage}%` }}></div></div>
+                    <button onClick={onHome} className="w-full bg-slate-800 text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-slate-700">ホームに戻る</button>
+                </div>
+            );
+        };
+
+        // --- 設定画面 ---
+        const SettingsScreen = ({ onLogout, onEnterTeacherMode, userName, email }) => (
+            <div className="p-4 space-y-6">
+                <h2 className="text-2xl font-bold text-slate-800">Settings</h2>
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 space-y-4">
+                    <div className="flex items-center space-x-4 mb-2"><div className="bg-blue-100 p-3 rounded-full text-blue-600"><i className="fas fa-user text-xl"></i></div><div><p className="font-bold text-slate-800">{userName}</p><p className="text-sm text-slate-500">{email}</p></div></div>
+                    <hr className="border-slate-100" />
+                    <button onClick={onEnterTeacherMode} className="w-full flex items-center justify-center space-x-2 text-slate-700 bg-slate-50 py-3 rounded-lg font-bold hover:bg-slate-100 border border-slate-200"><i className="fas fa-pen-nib"></i><span>教師モードへ</span></button>
+                    <button onClick={onLogout} className="w-full flex items-center justify-center space-x-2 text-red-500 bg-red-50 py-3 rounded-lg font-bold hover:bg-red-100"><i className="fas fa-sign-out-alt"></i><span>ログアウト</span></button>
+                </div>
+            </div>
+        );
+
+        // --- スピーキング画面 ---
+        const SpeakingScreen = ({ onExit }) => {
+            const [status, setStatus] = useState('idle');
+            const [transcript, setTranscript] = useState('');
+            const [feedback, setFeedback] = useState('');
+            const targetPhrase = "Go straight and turn left";
+
+            const startListening = () => {
+                if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) { alert('Speech API not supported'); return; }
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                const recognition = new SpeechRecognition();
+                recognition.lang = 'en-US';
+                recognition.start();
+                setStatus('listening'); setTranscript(''); setFeedback('');
+                recognition.onresult = (e) => { const t = e.results[0][0].transcript; setTranscript(t); evaluate(t); };
+                recognition.onerror = () => { setStatus('fail'); setFeedback('Try again'); };
+                recognition.onend = () => { if (status === 'listening') setStatus('idle'); };
+            };
+
+            const evaluate = (text) => {
+                setStatus('processing');
+                const c = text.toLowerCase().replace(/[.,!?]/g, '');
+                const t = targetPhrase.toLowerCase().replace(/[.,!?]/g, '');
+                setTimeout(() => {
+                    if (c === t || c.includes("go straight") || c.includes("turn left")) { setStatus('success'); setFeedback('Great pronunciation!'); }
+                    else { setStatus('fail'); setFeedback('Not quite.'); }
+                }, 800);
+            };
+
+            return (
+                <div className="h-full flex flex-col">
+                    <div className="flex items-center mb-6"><button onClick={onExit}><i className="fas fa-times-circle text-2xl text-slate-400"></i></button><span className="ml-2 font-bold text-slate-700">スピーキング</span></div>
+                    <div className="flex-1 flex flex-col items-center">
+                        <div className="w-full bg-white p-6 rounded-2xl shadow-sm border border-slate-100 mb-8">
+                            <div className="flex items-start mb-6"><div className="w-10 h-10 rounded-full bg-orange-400 flex items-center justify-center text-white font-bold flex-shrink-0 mr-3">AI</div><div className="bg-slate-100 p-4 rounded-2xl rounded-tl-none text-slate-700"><p>Excuse me, how can I get to the station?</p><button onClick={() => playAudio("Excuse me, how can I get to the station?")} className="mt-2 text-blue-500 text-xs font-bold flex items-center"><i className="fas fa-volume-up mr-1"></i> Listen</button></div></div>
+                            <div className="flex items-end justify-end flex-col"><div className="bg-blue-50 p-4 rounded-2xl rounded-tr-none text-blue-900 border border-blue-100 w-full"><p className="text-xs text-blue-400 font-bold mb-1">YOUR TURN</p><p className="text-xl font-bold">{targetPhrase}</p><button onClick={() => playAudio(targetPhrase)} className="mt-2 text-blue-500 text-xs font-bold flex items-center"><i className="fas fa-volume-up mr-1"></i> Model</button></div></div>
+                        </div>
+                        <div className="min-h-[100px] text-center">{transcript && <p className="italic text-slate-500">"{transcript}"</p>}{status==='success' && <p className="text-green-500 font-bold">{feedback}</p>}{status==='fail' && <p className="text-red-400 font-bold">{feedback}</p>}</div>
+                        <div className="mt-auto mb-12"><button onClick={startListening} disabled={status==='listening'||status==='processing'} className={`w-24 h-24 rounded-full flex items-center justify-center shadow-xl ${status==='listening'?'bg-red-500 animate-pulse':'bg-blue-600'}`}><i className="fas fa-microphone text-white text-2xl"></i></button></div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ==========================================
+        // 4. メインApp
+        // ==========================================
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [loadingAuth, setLoadingAuth] = useState(true);
+            const [screen, setScreen] = useState('home');
+            const [activeTab, setActiveTab] = useState('home');
+            const [vocabularyProblems, setVocabularyProblems] = useState([]);
+            const [grammarProblems, setGrammarProblems] = useState([]);
+            const [assignments, setAssignments] = useState([]);
+            const [studentSubmissions, setStudentSubmissions] = useState([]);
+            const [userStats, setUserStats] = useState({ xp: 0, streak: 1 });
+            const [quizConfig, setQuizConfig] = useState(null);
+            const [lastResult, setLastResult] = useState(null);
+
+            useEffect(() => {
+                const unsubscribe = onAuthStateChanged(auth, (u) => { setUser(u); setLoadingAuth(false); });
+                return () => unsubscribe();
+            }, []);
+
+            useEffect(() => {
+                if (!user) return;
+                const unsubStats = onSnapshot(doc(db, 'artifacts', appId, 'users', user.uid, 'data', 'profile'), (s) => {
+                    if (s.exists()) setUserStats({ xp: s.data().xp || 0, streak: s.data().streak || 1 });
+                    else setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'data', 'profile'), { xp: 0, streak: 1, createdAt: serverTimestamp() });
+                });
+                const unsubProbs = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'problems'), (s) => {
+                    const all = s.docs.map(d => ({ id: d.id, ...d.data() }));
+                    setVocabularyProblems(all.filter(p => p.category === 'vocabulary'));
+                    setGrammarProblems(all.filter(p => p.category === 'grammar'));
+                });
+                const unsubAssigns = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'assignments'), (s) => setAssignments(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+                const unsubSubs = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'submissions')), (s) => setStudentSubmissions(s.docs.map(d => ({ id: d.id, ...d.data() })).filter(x => x.status === 'pending')));
+                return () => { unsubStats(); unsubProbs(); unsubAssigns(); unsubSubs(); };
+            }, [user]);
+
+            const handleLogout = async () => { await signOut(auth); setScreen('home'); setActiveTab('home'); };
+            const handleAddProblem = async (type, problem) => { if(!user)return; await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'problems'), { ...problem, category: type, createdBy: user.uid }); };
+            const handleCreateAssignment = async (title, category) => { if(!user)return; const problems = category === 'Vocabulary' ? vocabularyProblems : grammarProblems; await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'assignments'), { title, category, problems: problems.map(p => p.id), xp: problems.length * 50, createdAt: serverTimestamp(), createdBy: user.uid }); };
+            const handleSubmitProblem = async (problem) => { if(!user)return; await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'submissions'), { ...problem, authorId: user.uid, authorName: user.displayName || 'Student' }); await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'data', 'profile'), { xp: userStats.xp + 50 }); alert('提出しました！(+50XP)'); setScreen('home'); };
+            const handleApproveSubmission = async (sub) => { if(!user)return; await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'problems'), { question: sub.question, options: sub.options, answer: sub.answer, explanation: sub.explanation, sentence: sub.sentence, category: sub.category, createdBy: sub.authorId }); await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'submissions', sub.id)); };
+            const handleRejectSubmission = async (id) => { if(!user)return; await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'submissions', id)); };
+            const startQuiz = (mode, data = null) => { let problems = [], xp = 0, assignmentId = null; if (mode === 'assignment' && data) { problems = data.problems.map(pid => [...vocabularyProblems, ...grammarProblems].find(p => p.id === pid)).filter(Boolean); xp = data.xp; assignmentId = data.id; } else if (mode === 'vocabulary') { problems = vocabularyProblems; xp = problems.length * 50; } else if (mode === 'grammar') { problems = grammarProblems; xp = problems.length * 50; } if (problems.length === 0) { alert("問題がありません"); return; } setQuizConfig({ problems, xp, assignmentId }); setScreen('quiz'); };
+            const handleQuizComplete = async (score, total) => { const xpEarned = Math.round(quizConfig.xp * (score / total)); const prevInfo = getLevelInfo(userStats.xp); const newXp = userStats.xp + xpEarned; const currInfo = getLevelInfo(newXp); if(user) await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'data', 'profile'), { xp: newXp }); setLastResult({ score, total, xpGained: xpEarned, isLevelUp: currInfo.level > prevInfo.level, currentLevel: currInfo.level }); setScreen('result'); };
+
+            if (loadingAuth) return <div className="min-h-screen flex items-center justify-center"><i className="fas fa-spinner fa-spin text-4xl text-indigo-500"></i></div>;
+            if (!user) return <AuthScreen />;
+
+            return (
+                <div className="max-w-md mx-auto bg-white min-h-screen shadow-xl relative overflow-hidden flex flex-col">
+                    <main className="flex-1 overflow-y-auto no-scrollbar">
+                        <div className={screen === 'home' || screen === 'teacher' ? "p-5 pb-20" : "p-5 h-full"}>
+                            {screen === 'home' && (
+                                activeTab === 'settings' ? <SettingsScreen onLogout={handleLogout} userName={user.displayName} email={user.email} onEnterTeacherMode={() => setScreen('teacher')} /> :
+                                <HomeScreen userStats={userStats} assignments={assignments} onStartAssignment={(a) => startQuiz('assignment', a)} onStartSelfStudy={(mode) => startQuiz(mode)} onGoToSpeaking={() => setScreen('speaking')} onGoToCreate={() => setScreen('create_problem')} userName={user.displayName} />
+                            )}
+                            {screen === 'create_problem' && <StudentCreateScreen onExit={() => setScreen('home')} onSubmitProblem={handleSubmitProblem} />}
+                            {screen === 'teacher' && <TeacherScreen onExit={() => setScreen('home')} onAddProblem={handleAddProblem} onCreateAssignment={handleCreateAssignment} vocabCount={vocabularyProblems.length} grammarCount={grammarProblems.length} submissions={studentSubmissions} onApproveSubmission={handleApproveSubmission} onRejectSubmission={handleRejectSubmission} />}
+                            {screen === 'quiz' && <QuizScreen quizData={quizConfig?.problems} onComplete={handleQuizComplete} onExit={() => setScreen('home')} />}
+                            {screen === 'speaking' && <SpeakingScreen onExit={() => setScreen('home')} />}
+                            {screen === 'result' && <ResultScreen {...lastResult} onHome={() => setScreen('home')} />}
+                        </div>
+                    </main>
+                    {screen === 'home' && (
+                        <nav className="bg-white border-t border-slate-100 px-6 py-3 flex justify-between items-center fixed bottom-0 left-0 right-0 max-w-md mx-auto z-40">
+                            <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center space-y-1 ${activeTab === 'home' ? 'text-blue-600' : 'text-slate-400'}`}><i className="fas fa-home text-2xl"></i><span className="text-[10px] font-bold">Home</span></button>
+                            <button onClick={() => setActiveTab('stats')} className={`flex flex-col items-center space-y-1 ${activeTab === 'stats' ? 'text-blue-600' : 'text-slate-400'}`}><i className="fas fa-chart-line text-2xl"></i><span className="text-[10px] font-bold">Stats</span></button>
+                            <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center space-y-1 ${activeTab === 'settings' ? 'text-blue-600' : 'text-slate-400'}`}><i className="fas fa-cog text-2xl"></i><span className="text-[10px] font-bold">Settings</span></button>
+                        </nav>
+                    )}
+                </div>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
